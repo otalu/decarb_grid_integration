@@ -110,14 +110,14 @@ def load_templates(template_dir, outputs):
     templates = {}
     if outputs["bdg_i"]:
         templates["bdg_i"] = pd.read_csv(
-            str(template_dir / "bdg_i.csv"), header=None, index_col=0)
+            str(template_dir / "bdg_i.csv"), header=None, index_col=0, dtype=object)
     if outputs["cfg"]:
         templates["cfg"] = pd.read_csv(
-            str(template_dir / "cfg.csv"), header=None, index_col=0)
+            str(template_dir / "cfg.csv"), header=None, index_col=0, dtype=object)
     if outputs["other"]:
         for fname in OTHER_TEMPLATE_FILES:
             templates[fname] = pd.read_csv(
-                str(template_dir / fname), header=None, index_col=0)
+                str(template_dir / fname), header=None, index_col=0, dtype=object)
     if outputs["chp"] or outputs["sp"]:
         templates["chp"] = pd.read_csv(str(template_dir / "chp.csv"))
     if outputs["topo"]:
