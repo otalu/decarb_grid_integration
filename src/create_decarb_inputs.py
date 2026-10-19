@@ -473,7 +473,15 @@ def generate_tm_data(consumption_df, setpoint_df, building_row, schedule_df,
     avail = [c for c in hw_load_cols if c in consumption_df.columns]
     if avail:
         hw_kbtu = consumption_df[avail].sum(axis=1) * 0.293071
-        df["pHWdem"] = resample_if_needed(hw_kbtu, timestep, "sum").values
+        hw_dem = resample_if_needed(hw_kbtu, timestep, "sum").values
+        # Tank losses go negative when the tank's surroundings are warmer than
+        # the water (e.g. TX garages/attics); DECARB requires demand >= 0.
+        neg = hw_dem < 0
+        if neg.any():
+            bid = building_row.index[0] if building_row.index.name in ("bldg_id", "building_id") else "?"
+            log.info(f"Building {bid}: hot water demand negative in {int(neg.sum())} steps "
+                     f"(min {hw_dem.min():.4f} kWh), clipped to 0")
+        df["pHWdem"] = np.clip(hw_dem, 0, None)
     else:
         df["pHWdem"] = 0.0
 
