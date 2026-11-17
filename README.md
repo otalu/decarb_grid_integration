@@ -32,6 +32,7 @@ Downloaded automatically by the data acquisition stage. Everything is public, an
 | ResStock metadata (`{STATE}_upgrade0.parquet`, plus a `.csv.gz` copy for manual inspection) | OEDI S3 `oedi-data-lake`, `resstock` settings in `config.yaml` | `in/` |
 | ResStock 15-min building profiles | same | `in/residential_profiles/{STATE}/` |
 | SMART-DS feeder network (`.dss` files for the zone) | OEDI S3, `smartds` settings in `config.yaml` | `paths.network_dir` (default `in/smartds/`) |
+| SMART-DS profiles of the zone's non-residential (commercial) loads (`data_acquisition.download_network_profiles`) | same | `paths.network_dir/profiles/` |
 
 Included in the repo:
 
@@ -57,6 +58,7 @@ Settings a new user usually changes:
 state: "NY"                   # ResStock state of the buildings
 timezone: "America/New_York"  # time zone of the buildings (TOU peak hours, DECARB output dates)
 zone: {name: "P101U"}         # SMART-DS zone (feeder network) to use
+#   zone.substations / zone.feeders: optional lists to run only part of the zone
 paths:
   network_dir: "../in/smartds"  # on Windows keep the project path short (260-character path limit)
 test_mode: true               # 600 buildings and one zone, for a quick end-to-end check
@@ -88,7 +90,9 @@ Runs the stages switched on under `stages:`, in this order:
 
 Every stage stops with a clear error if its inputs are missing, instead of producing partial results. With `test_mode: true`, every stage uses the same `test_limit` lowest building IDs and only `zone.name`, and logs `TEST MODE: ...`.
 
-`in/feeder_summaries*.parquet` hold one zone and state at a time. Switching `zone.name` or `state` means re-running feeder processing and matching. `decarb-inputs` and `network-inputs` stop if the matched file is for a different zone.
+`in/feeder_summaries*.parquet` hold one zone and state at a time. Switching `zone.name` or `state` means re-running feeder processing and matching.
+
+To run only part of a zone, list substations and/or feeders under `zone.substations` / `zone.feeders` (folder names in `network_dir/{zone}/scenarios/base_timeseries/opendss/{substation}/{feeder}`; if both are set, their union). Feeder processing, matching (and so DECARB), the commercial profile download and the OpenDSS cases then cover only those feeders. Changing the selection means re-running feeder processing and matching; `decarb-inputs` and `network-inputs` stop if the matching file includes feeders outside the selection. `decarb-inputs` and `network-inputs` stop if the matched file is for a different zone.
 
 ### 4.2 DECARB inputs
 
@@ -111,7 +115,7 @@ Outside this Python pipeline: edit the settings block at the top of `src/run_dec
 python src/run_pipeline.py network-inputs --study N
 ```
 
-Builds `out/studies/study_N/opendss/{case}/`. It copies the zone's feeders from `network_dir`, and replaces each matched residential load with that building's DECARB profile (kW and reconstructed kvar). The time axis follows the `timestep` and `date_range` saved in the study's own `config.yaml`. With `interpolation.enabled: true` in `network.yaml`, it also writes intermediate electrification/solar penetration levels (see below).
+Builds `out/studies/study_N/opendss/{case}/`. It copies the zone's feeders from `network_dir`, and replaces each matched residential load with that building's DECARB profile (kW and reconstructed kvar). Non-residential (commercial) loads stay as in SMART-DS, with their SMART-DS profiles shifted to the DECARB clock (`smartds.utc_offset_hours`), resampled to the case timestep and written once per study to `opendss/smartds_profiles/`. The time axis follows the `timestep` and `date_range` saved in the study's own `config.yaml`. With `interpolation.enabled: true` in `network.yaml`, it also writes intermediate electrification/solar penetration levels (see below).
 
 ### 4.5 OpenDSS and results
 

@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 import pandas as pd
-import requests
 from botocore import UNSIGNED
 from botocore.config import Config
 
@@ -215,15 +214,24 @@ def download_metadata(cfg):
             log.warning(f"Failed to download {filename} (only used for manual checks): {e}")
 
 
-def _collect_profile_filenames(opendss_dir):
+def _collect_profile_filenames(feeder_dirs):
+    """Profile CSVs referenced by the feeders' non-residential load shapes.
+    Residential loads are replaced by DECARB results, so their profiles are
+    not needed."""
     filenames = set()
-    for root, _, files in os.walk(str(opendss_dir)):
-        for f in files:
-            if f == "LoadShapes.dss":
-                with open(os.path.join(root, f), "r") as fh:
-                    for match in re.finditer(r'file=[\.\./]*profiles/([^\s\)]+)', fh.read()):
-                        filenames.add(match.group(1))
+    for path in (Path(fd) / "LoadShapes.dss" for fd in feeder_dirs):
+        if not path.exists():
+            continue
+        for match in re.finditer(r'file=[^\s\)]*?profiles/([^\s\)]+)', path.read_text()):
+            if not match.group(1).startswith("res_"):
+                filenames.add(match.group(1))
     return filenames
+
+
+def smartds_profiles_dir(cfg):
+    """Where the SMART-DS profiles are stored: paths.network_dir/profiles, the
+    bucket layout, so the feeders' relative profile paths resolve."""
+    return Path(cfg["paths"]["network_dir"]) / "profiles"
 
 
 def _smartds_location(cfg):
@@ -232,25 +240,6 @@ def _smartds_location(cfg):
     if missing:
         raise KeyError(f"config.yaml is missing smartds.{', smartds.'.join(missing)}")
     return sm["s3_bucket"], sm["s3_prefix"].strip("/")
-
-
-def _download_profile(filename, output_dir, base_url, max_retries=5):
-    url = base_url + filename
-    out = os.path.join(str(output_dir), filename)
-    if os.path.exists(out):
-        return "skipped"
-    for attempt in range(1, max_retries + 1):
-        try:
-            resp = requests.get(url, timeout=60)
-            resp.raise_for_status()
-            with open(out, "wb") as f:
-                f.write(resp.content)
-            return "downloaded"
-        except requests.RequestException as e:
-            log.warning(f"Attempt {attempt}/{max_retries} failed for {filename}: {e}")
-            time.sleep(5 * attempt)
-    log.error(f"Failed to download {filename} after {max_retries} attempts")
-    return "failed"
 
 
 def network_profiles_enabled(cfg):
@@ -375,57 +364,57 @@ def download_network(cfg):
                            f"Re-run data acquisition to retry; finished files are skipped.{hint}")
 
 
-def download_network_profiles(cfg, kvar_only=False):
-    network_dir = cfg["paths"]["network_dir"]
+def download_network_profiles(cfg):
+    """Download the SMART-DS kW and kvar profiles of the non-residential
+    (commercial) loads on the selected feeders (zone.substations / zone.feeders,
+    default: the whole zone) into smartds_profiles_dir(cfg). The OpenDSS cases
+    keep these loads with their SMART-DS profiles. Existing files are skipped."""
+    from process_network_info import list_feeders, select_feeders, select_zones
+
+    s3 = _s3_client(download_workers(cfg))
     bucket, prefix = _smartds_location(cfg)
-    base_url = f"https://{bucket}.s3.amazonaws.com/{prefix}/profiles/"
+    network_dir = Path(cfg["paths"]["network_dir"])
+    profiles_dir = smartds_profiles_dir(cfg)
+    profiles_dir.mkdir(parents=True, exist_ok=True)
 
-    zone_dirs = sorted(
-        d for d in Path(network_dir).iterdir()
-        if d.is_dir()
-    )
-
-    from process_network_info import select_zones
-    zone_dirs = select_zones(cfg, zone_dirs)
-
+    zone_dirs = select_zones(cfg, sorted(d for d in network_dir.iterdir()
+                                         if d.is_dir() and d != profiles_dir))
+    failed = []
     for zone_dir in zone_dirs:
         opendss_dir = zone_dir / "scenarios" / "base_timeseries" / "opendss"
         if not opendss_dir.is_dir():
-            log.warning(f"No opendss dir for {zone_dir.name}, skipping")
-            continue
+            raise FileNotFoundError(
+                f"No SMART-DS network for {zone_dir.name} at {opendss_dir}; turn on "
+                f"data_acquisition.download_network and run data acquisition")
+        filenames = sorted(_collect_profile_filenames(select_feeders(cfg, list_feeders(opendss_dir))))
 
-        all_filenames = _collect_profile_filenames(opendss_dir)
-        if kvar_only:
-            to_download = sorted(f for f in all_filenames if "_kvar_" in f)
-        else:
-            to_download = sorted(all_filenames)
+        def _fetch(fn):
+            local = profiles_dir / fn
+            if local.exists():
+                return "skipped"
+            try:
+                s3.download_file(bucket, f"{prefix}/profiles/{fn}", str(local))
+                return "downloaded"
+            except Exception as e:
+                return f"failed: {e}"
 
-        profiles_dir = opendss_dir / "opendss_loadshape_files"
-        profiles_dir.mkdir(parents=True, exist_ok=True)
-
-        log.info(f"{zone_dir.name}: {len(to_download)} profile files to check")
-
-        succeeded = 0
-        failed = 0
-        skipped = 0
-
+        counts = {"downloaded": 0, "skipped": 0}
         with ThreadPoolExecutor(max_workers=download_workers(cfg)) as executor:
-            futures = {
-                executor.submit(_download_profile, fn, profiles_dir, base_url): fn
-                for fn in to_download
-            }
+            futures = {executor.submit(_fetch, fn): fn for fn in filenames}
             for future in as_completed(futures):
                 result = future.result()
-                if result == "downloaded":
-                    succeeded += 1
-                    if succeeded % 50 == 0:
-                        log.info(f"  {zone_dir.name}: {succeeded} downloaded so far")
-                elif result == "skipped":
-                    skipped += 1
+                if result in counts:
+                    counts[result] += 1
                 else:
-                    failed += 1
+                    failed.append((futures[future], result))
+        log.info(f"{zone_dir.name}: {len(filenames)} non-residential profiles, "
+                 f"{counts['downloaded']} downloaded, {counts['skipped']} already present, "
+                 f"{len(filenames) - sum(counts.values())} failed -> {profiles_dir}")
 
-        log.info(f"{zone_dir.name}: {succeeded} downloaded, {skipped} already existed, {failed} failed")
+    if failed:
+        examples = "\n".join(f"  {fn}: {r}" for fn, r in failed[:10])
+        raise RuntimeError(f"{len(failed)} profile file(s) failed to download:\n{examples}\n"
+                           f"Re-run data acquisition to retry; finished files are skipped.")
 
 
 if __name__ == "__main__":

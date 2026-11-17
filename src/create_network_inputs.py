@@ -572,10 +572,80 @@ def compute_kvar_curve(ts_df, pf_ht):
     )
 
 
+# Non-residential (commercial) loads keep their SMART-DS profiles: per-unit,
+# 15-min, one full year (35040 rows), standard time with no DST, at
+# smartds.utc_offset_hours. They are shifted so row i covers the same UTC
+# interval as the DECARB residential row i (ResStock: EST, UTC-5), resampled to
+# the case timestep and cut to date_range.
+RESSTOCK_UTC_OFFSET_HOURS = -5       # as create_decarb_inputs.RESSTOCK_UTC_OFFSET
+SMARTDS_STEPS = 35040
+FILE_REF = re.compile(r"file=([^\s\)]+)", re.IGNORECASE)
+
+
+def smartds_shift_rows(cfg):
+    """15-min rows to roll the SMART-DS profiles by to line them up with ResStock in UTC."""
+    offset = (cfg.get("smartds") or {}).get("utc_offset_hours")
+    if offset is None:
+        raise KeyError("config.yaml is missing smartds.utc_offset_hours (clock of the SMART-DS "
+                       "profiles, e.g. -6 for Full_Texas)")
+    return int(round((RESSTOCK_UTC_OFFSET_HOURS - float(offset)) * 4))
+
+
+def write_smartds_profile(src, dst, shift_rows, timestep, step_indices):
+    """Shift, resample and cut one SMART-DS profile; write it to dst."""
+    if not src.exists():
+        raise FileNotFoundError(
+            f"SMART-DS profile not found: {src}. Turn on data_acquisition.download_network_profiles "
+            f"in config.yaml and run data acquisition.")
+    values = np.loadtxt(src, delimiter=",", ndmin=1)
+    if values.ndim > 1:
+        values = values[:, -1]
+    if len(values) != SMARTDS_STEPS:
+        raise ValueError(f"{src}: {len(values)} rows, expected {SMARTDS_STEPS} (15-min, one year)")
+    values = np.roll(values, shift_rows)
+    rows_per_step = 4 // STEPS_PER_HOUR[timestep]
+    values = values.reshape(-1, rows_per_step).mean(axis=1)
+    if step_indices is not None:
+        values = values[step_indices]
+    np.savetxt(str(dst), values, fmt="%.6f")
+
+
+def smartds_nonresidential(feeder_dir):
+    """Non-residential Load lines of a SMART-DS feeder (kept as written) and the
+    load shapes they use: {shape name: {"mult": file, "qmult": file or None}}."""
+    from process_network_info import parse_dss_objects
+    keep, used = [], set()
+    for raw in (feeder_dir / "Loads.dss").read_text().splitlines():
+        if not re.match(r"(?i)\s*new\s+load\.", raw):
+            continue
+        m = re.search(r"(?i)\byearly\s*=\s*(\S+)", raw)
+        if m and m.group(1).lower().startswith("res"):
+            continue
+        keep.append(raw.strip())
+        if m:
+            used.add(m.group(1))
+    shapes = {}
+    if used:
+        ls = parse_dss_objects(feeder_dir / "LoadShapes.dss", "Loadshape")
+        for _, row in ls[ls["Name"].isin(used)].iterrows():
+            files = {}
+            for key in ("mult", "qmult"):
+                ref = FILE_REF.search(str(row.get(key, "")))
+                files[key] = Path(ref.group(1)).name if ref else None
+            if files["mult"] is None:
+                raise ValueError(f"{feeder_dir / 'LoadShapes.dss'}: no mult file for {row['Name']}")
+            shapes[row["Name"]] = files
+        missing = used - set(shapes)
+        if missing:
+            raise ValueError(f"{feeder_dir}: load shape(s) used in Loads.dss but not defined in "
+                             f"LoadShapes.dss: {sorted(missing)[:5]}")
+    return keep, shapes
+
+
 def generate_opendss_loadshapes(decarb_case_dir, building_map_df,
                                 network_dir, zone_name, output_dir, ncfg,
                                 sub_map=None, timestep="hourly",
-                                step_indices=None):
+                                step_indices=None, smartds=None):
     """Build complete OpenDSS case directories from DECARB outputs.
 
     For each case:
@@ -583,6 +653,9 @@ def generate_opendss_loadshapes(decarb_case_dir, building_map_df,
       2. Copy template feeder folders (topology, lines, transformers)
       3. Rewrite LoadShapes.dss per feeder to define shapes pointing to our profiles
       4. Rewrite Loads.dss per feeder to reference our shape names
+      5. Keep each feeder's non-residential loads, with their SMART-DS profiles
+         shifted/resampled once per study into smartds["dst"] (see
+         write_smartds_profile)
 
     The result is a self-contained case directory that run_opendss.py can
     compile and solve with no special logic.
@@ -675,14 +748,10 @@ def generate_opendss_loadshapes(decarb_case_dir, building_map_df,
                 except OSError:
                     pass
 
-    # Discover feeders in template
-    src_feeders = []
-    for sub in sorted(zone_template.iterdir()):
-        if not sub.is_dir() or not sub.name.startswith("p"):
-            continue
-        for fd in sorted(sub.iterdir()):
-            if fd.is_dir() and (fd / "Master.dss").exists():
-                src_feeders.append(fd)
+    # Feeders in the template: all of the zone, or zone.substations / zone.feeders
+    from process_network_info import list_feeders, select_feeders
+    src_feeders = [fd for fd in select_feeders((smartds or {}).get("cfg", {}), list_feeders(zone_template))
+                   if (fd / "Master.dss").exists()]
 
     log.info(f"Copying {len(src_feeders)} feeder templates into case directory")
 
@@ -703,9 +772,6 @@ def generate_opendss_loadshapes(decarb_case_dir, building_map_df,
             (feeder_df["substation"] == substation) &
             (feeder_df["feeder"] == feeder)
         ] if "feeder" in feeder_df.columns else pd.DataFrame()
-
-        if feeder_loads.empty:
-            continue
 
         # Collect which buildings are used by this feeder
         used_bldg_ids = set()
@@ -731,6 +797,24 @@ def generate_opendss_loadshapes(decarb_case_dir, building_map_df,
                 f"model={row['model']} kW={kw} kvar={kvar} "
                 f"Phases={row['phases']} yearly={shape_name}"
             )
+
+        # Non-residential loads: SMART-DS lines as written, shapes on the
+        # study's shifted/resampled profiles
+        if smartds is not None:
+            com_lines, com_shapes = smartds_nonresidential(src_feeder_dir)
+            load_lines += com_lines
+            for name, files in sorted(com_shapes.items()):
+                for fn in files.values():
+                    if fn and fn not in smartds["done"]:
+                        write_smartds_profile(smartds["src"] / fn, smartds["dst"] / fn,
+                                              smartds["shift"], timestep, step_indices)
+                        smartds["done"].add(fn)
+                line = (f"New Loadshape.{name} npts={n_steps} interval={interval_h:g} "
+                        f"mult=(file={(smartds['dst'] / files['mult']).as_posix()})")
+                if files["qmult"]:
+                    line += f" qmult=(file={(smartds['dst'] / files['qmult']).as_posix()})"
+                shape_lines.append(line)
+            smartds["loads"] += len(com_lines)
 
         # Write LoadShapes.dss
         for bldg_id in sorted(used_bldg_ids):
@@ -852,6 +936,8 @@ def run_network_inputs(cfg, ncfg=None, study_num=None):
                     f"{feeder_parquet} is for zone(s) {', '.join(file_zones) or 'none'}, "
                     f"but zone.name in config.yaml is {zone_name!r}. Set zone.name to the "
                     f"study's zone, or use a study made for {zone_name}.")
+        from process_network_info import check_matching_feeders
+        check_matching_feeders(cfg, feeder_df, str(feeder_parquet))
         _run_opendss(cfg, study_dir, decarb_root, decarb_cases,
                      feeder_df, network_dir, zone_name, ncfg)
     else:
@@ -932,11 +1018,19 @@ def _run_opendss(cfg, study_dir, decarb_root, decarb_cases,
     bldg_col = "nrel_climate_match" if "nrel_climate_match" in feeder_df.columns else "bldg_id"
     all_bldg_ids = feeder_df[bldg_col].dropna().astype(int).unique().tolist()
 
+    from data_acquisition import smartds_profiles_dir
+    smartds = {"cfg": cfg, "src": smartds_profiles_dir(cfg), "dst": opendss_root / "smartds_profiles",
+               "shift": smartds_shift_rows(cfg), "done": set(), "loads": 0}
+    smartds["dst"].mkdir(parents=True, exist_ok=True)
+    log.info(f"Non-residential loads keep their SMART-DS profiles, shifted "
+             f"{smartds['shift'] / 4:+g} h to the DECARB (ResStock) clock -> {smartds['dst']}")
+
     for case_name in decarb_cases:
         decarb_case_dir = decarb_root / case_name
         opendss_case_dir = opendss_root / case_name
 
         log.info(f"OpenDSS case: {case_name}")
+        smartds["loads"] = 0
 
         # Build substitution map for failed buildings
         sub_map = build_substitution_map(decarb_case_dir, all_bldg_ids, cfg)
@@ -945,7 +1039,9 @@ def _run_opendss(cfg, study_dir, decarb_root, decarb_cases,
             decarb_case_dir, feeder_df,
             network_dir, zone_name, opendss_case_dir, ncfg,
             sub_map=sub_map, timestep=timestep,
-            step_indices=step_indices)
+            step_indices=step_indices, smartds=smartds)
+        log.info(f"  {smartds['loads']} non-residential loads kept "
+                 f"({len(smartds['done'])} SMART-DS profiles prepared for this study)")
 
 
 if __name__ == "__main__":

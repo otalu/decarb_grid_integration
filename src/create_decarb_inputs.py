@@ -1339,6 +1339,8 @@ def run_decarb_inputs(cfg, dcfg=None, study_dir=None):
                 raise ValueError(
                     f"{matching_file} is for zone(s) {', '.join(file_zones) or 'none'}, "
                     f"but zone.name in config.yaml is {zone_name!r}. {fix}.")
+            from process_network_info import check_matching_feeders
+            check_matching_feeders(cfg, matched_df, str(matching_file))
         bldg_col = "nrel_climate_match" if "nrel_climate_match" in matched_df.columns else "nrel_county_match"
         building_ids = (matched_df[bldg_col].dropna().astype(int)
                         .unique().tolist())

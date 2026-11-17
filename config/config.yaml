@@ -33,16 +33,21 @@ scope: "zone"
 
 # --- Zone Settings (only used when scope = "zone") ---
 zone:
-  name: "P101U"               # zone to analyze
+  name: "P100U"               # zone to analyze
+  substations: null           # optional: only these substations, e.g. ["p101uhs0_1247"]
+  feeders: null               # optional: only these feeders, e.g. ["p101uhs0_1247--p101udt19618"]
+                              # (null = all; if both are set, the union). Names are the folders in
+                              # network_dir/{zone}/scenarios/base_timeseries/opendss/{substation}/{feeder}.
+                              # Changing them means re-running feeder processing and matching.
 
 # --- Test Mode ---
 # When true, limits downloads and processing to a small subset
 test_mode: true
-test_limit: 600              # max buildings in the candidate pool (ignored when test_mode=false)
+test_limit: 100              # max buildings in the candidate pool (ignored when test_mode=false)
 
 # --- State & Geography ---
-state: "NY"
-state_full: "New York"
+state: "MA"
+state_full: "Massachusetts"
 year: 2018
 timezone: "America/New_York"  # IANA time zone of the buildings: local clock for TOU peak
                               # hours and DECARB output dates (pBtz)
@@ -66,14 +71,20 @@ resstock:
 smartds:
   s3_bucket: "oedi-data-lake"
   s3_prefix: "SMART-DS/v0.9/2018/Full_Texas"
+  utc_offset_hours: -6              # clock of the SMART-DS profiles: standard time, no DST.
+                                    # Full_Texas = Central (UTC-6), inferred from the data (commercial
+                                    # evening lighting follows Dallas sunset in CST); SMART-DS does not
+                                    # document it. Commercial profiles are shifted to match the DECARB
+                                    # residential profiles (ResStock, UTC-5) in absolute time.
 
 # --- Data Acquisition (only used when stages.data_acquisition: true) ---
 data_acquisition:
-  download_workers: 16              # parallel downloads (ResStock profiles, network, profiles)
+  download_workers: 20              # parallel downloads (ResStock profiles, network, profiles)
   download_network: true            # download the SMART-DS feeder .dss files for the zone(s)
                                     # into paths.network_dir (files already there are skipped)
-  download_network_profiles: false  # download the SMART-DS kw + kvar loadshape profiles referenced
-                                    # by the feeders; not used by the OpenDSS cases network-inputs builds
+  download_network_profiles: true   # download the SMART-DS kw + kvar profiles of the zone's
+                                    # non-residential (commercial) loads into network_dir/profiles;
+                                    # the OpenDSS cases keep those loads (network-inputs needs them)
 
 # --- Matching ---
 matching:

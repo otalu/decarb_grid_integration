@@ -35,6 +35,19 @@ heating/cooling unavailable periods. `pBtz` is set to the same time zone; in
 the current DECARB it only sets the time zone of the `Date` column in its
 outputs.
 
+**SMART-DS profiles (non-residential loads).** The OpenDSS cases replace the
+residential loads with DECARB results and keep every other load (commercial)
+with its SMART-DS profile. Those profiles are per-unit, 15-minute, 35040 rows,
+with no timestamps. SMART-DS does not document their clock; for Full_Texas it
+was inferred from the data: the weekday morning ramp is 1 h earlier in summer
+than in winter (standard time, no DST), and the evening lighting jump follows
+Dallas sunset in Central standard time (+0.1 to +0.2 h in the clean months). So
+row 0 is Jan 1 00:00-00:15 CST (UTC-6), one hour after the ResStock/DECARB
+row 0 (00:00 EST, UTC-5). `network-inputs` rolls them one hour
+(`smartds.utc_offset_hours` = -6) so both refer to the same UTC instants, then
+resamples to the case timestep and cuts to `date_range`. Before this, the
+OpenDSS cases contained the residential loads only.
+
 ## 2. Thermal model coefficients (`bdg_ii.csv`)
 
 The thermal model (`src/fit_thermal_model.py`) is fitted on the 15-minute

@@ -75,6 +75,76 @@ def select_zones(cfg, zone_dirs):
     return zone_dirs
 
 
+def list_feeders(opendss_dir):
+    """Feeder folders of a SMART-DS zone: {opendss}/{substation}/{feeder}."""
+    feeders = []
+    for sub in sorted(Path(opendss_dir).iterdir()):
+        if not sub.is_dir() or sub.name == "opendss_loadshape_files":
+            continue
+        feeders += [fd for fd in sorted(sub.iterdir())
+                    if fd.is_dir() and fd.name != "feeder_summaries"]
+    return feeders
+
+
+def feeder_selection(cfg):
+    """zone.substations and zone.feeders from config.yaml (None = not set)."""
+    zone = cfg.get("zone") or {}
+    subs, feeds = zone.get("substations"), zone.get("feeders")
+    if (subs or feeds) and cfg.get("scope") != "zone":
+        raise ValueError("zone.substations / zone.feeders only apply to scope: \"zone\"")
+    return (list(subs) if subs else None), (list(feeds) if feeds else None)
+
+
+def select_feeders(cfg, feeder_dirs):
+    """Feeders to work on: all of them, or those under zone.substations plus
+    those named in zone.feeders. Unknown names are an error."""
+    subs, feeds = feeder_selection(cfg)
+    if not subs and not feeds:
+        return feeder_dirs
+    all_subs = sorted({fd.parent.name for fd in feeder_dirs})
+    all_feeds = sorted(fd.name for fd in feeder_dirs)
+    for key, given, valid in (("substations", subs, all_subs), ("feeders", feeds, all_feeds)):
+        unknown = sorted(set(given or []) - set(valid))
+        if unknown:
+            raise ValueError(
+                f"zone.{key} in config.yaml: {', '.join(unknown)} not in zone "
+                f"{cfg['zone']['name']}. Available: {', '.join(valid[:20])}"
+                + (f", ... ({len(valid)} total)" if len(valid) > 20 else ""))
+    selected = [fd for fd in feeder_dirs
+                if (subs and fd.parent.name in subs) or (feeds and fd.name in feeds)]
+    log.info(f"Feeder selection: {len(selected)} of {len(feeder_dirs)} feeders "
+             f"(zone.substations={subs}, zone.feeders={feeds})")
+    return selected
+
+
+def check_matching_feeders(cfg, matched_df, label):
+    """Stop if a matching file covers feeders outside the current selection
+    (it was made with a different zone.substations / zone.feeders); warn about
+    selected feeders that have residential loads but none in the file."""
+    if cfg.get("scope") != "zone" or not {"substation", "feeder"} <= set(matched_df.columns):
+        return
+    opendss_dir = (Path(cfg["paths"]["network_dir"]) / cfg["zone"]["name"]
+                   / "scenarios" / "base_timeseries" / "opendss")
+    selected = select_feeders(cfg, list_feeders(opendss_dir))
+    sel = {(fd.parent.name, fd.name) for fd in selected}
+    in_file = set(zip(matched_df["substation"], matched_df["feeder"]))
+    extra = sorted(in_file - sel)
+    if extra:
+        raise ValueError(
+            f"{label} includes {len(extra)} feeder(s) outside the current feeder selection "
+            f"(zone.substations / zone.feeders), e.g. {extra[0][1]}. Re-run feeder processing "
+            f"and building matching, or change the selection back.")
+    subs, feeds = feeder_selection(cfg)
+    if subs or feeds:
+        missing = [fd.name for fd in selected if (fd.parent.name, fd.name) not in in_file
+                   and (fd / "Loads.dss").exists()
+                   and re.search(r"(?i)yearly\s*=\s*res", (fd / "Loads.dss").read_text())]
+        if missing:
+            log.warning(f"{label} has no loads for {len(missing)} selected feeder(s) with "
+                        f"residential loads, e.g. {missing[0]}; re-run feeder processing and "
+                        f"building matching if the selection changed")
+
+
 DSS_NEW_OBJECT = re.compile(r"^new\s+(\w+)\.(\S+)\s*(.*)$", re.IGNORECASE)
 DSS_PROPERTY = re.compile(r"(\w+)\s*=\s*(\([^)]*\)|\[[^\]]*\]|\"[^\"]*\"|'[^']*'|[^\s]+)")
 
@@ -171,7 +241,7 @@ def process_feeder(feeder_path, feeder_name, substation_name, zone_name, countie
     return merged_df
 
 
-def process_zone(zone_dir, counties):
+def process_zone(zone_dir, counties, cfg):
     zone_name = zone_dir.name
     opendss_path = zone_dir / "scenarios" / "base_timeseries" / "opendss"
 
@@ -179,10 +249,8 @@ def process_zone(zone_dir, counties):
         log.warning(f"No opendss path for {zone_name}")
         return pd.DataFrame()
 
-    substations = [
-        d for d in sorted(opendss_path.iterdir())
-        if d.is_dir() and d.name != "opendss_loadshape_files"
-    ]
+    feeders = select_feeders(cfg, list_feeders(opendss_path))
+    substations = sorted({fd.parent.name for fd in feeders})
 
     if not substations:
         log.warning(f"No substations found in {zone_name}")
@@ -190,18 +258,12 @@ def process_zone(zone_dir, counties):
 
     zone_records = []
 
-    for substation_dir in substations:
-        feeders = [
-            d for d in sorted(substation_dir.iterdir())
-            if d.is_dir() and d.name != "feeder_summaries"
-        ]
-
-        for feeder_dir in feeders:
-            df = process_feeder(
-                feeder_dir, feeder_dir.name, substation_dir.name, zone_name, counties
-            )
-            if not df.empty:
-                zone_records.append(df)
+    for feeder_dir in feeders:
+        df = process_feeder(
+            feeder_dir, feeder_dir.name, feeder_dir.parent.name, zone_name, counties
+        )
+        if not df.empty:
+            zone_records.append(df)
 
     if not zone_records:
         return pd.DataFrame()
@@ -262,7 +324,7 @@ def process_all_zones(cfg):
 
     all_dfs = []
     for i, zone_dir in enumerate(zones, 1):
-        zone_df = process_zone(zone_dir, counties)
+        zone_df = process_zone(zone_dir, counties, cfg)
         if not zone_df.empty:
             all_dfs.append(zone_df)
         log.info(f"  [{i}/{len(zones)}] {zone_dir.name} done")
