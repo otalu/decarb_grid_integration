@@ -17,7 +17,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from internal_gains import equipment_kwh, lighting_kwh, occupant_count
-from config.loader import (load_config, load_decarb_config, resolve_step_indices,
+from config.loader import (load_config, load_decarb_config, resolve_step_indices, job_workers,
                            resolve_timestep)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1482,7 +1482,7 @@ def run_decarb_inputs(cfg, dcfg=None, study_dir=None, description=None):
                 case_name = f"{tariff['name']}_heat_{elec}_solar_100"
                 cases.append((tariff, elec, True, case_name))
 
-    max_workers = dcfg.get("max_workers", 4)
+    max_workers = job_workers(dcfg.get("max_workers", 4))
 
     for tariff, elec_level, has_solar, case_name in cases:
         # Skip cases that already exist in the study directory

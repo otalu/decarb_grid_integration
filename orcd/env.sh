@@ -9,12 +9,8 @@ MAIL_USER=""                          # e.g. you@mit.edu (empty = no mail)
 DECARB_DIR="$HOME/decarb-main"        # DECARB repository (folder with Project.toml)
 SOLVER="gurobi"                       # "gurobi" or "highs" (the Gurobi license allows at most 100 workers)
 DECARB_TIME="12:00:00"                # time limit of the DECARB job
-# Workers and memory: chosen per run with submit_decarb.sh (60 -> 1000G, 90 -> 1500G)
-
-# --- Python jobs (preprocess, decarb-inputs, network) ---
-PY_CPUS=21                            # 20 parallel workers + 1
-PY_MEM="128G"
-PY_TIME="12:00:00"
+PY_TIME="12:00:00"                    # time limit of the Python jobs (preprocess, decarb-inputs, network)
+# Workers and memory: chosen per job when submitting (60 -> 1000G, 90 -> 1500G, CPUs = workers + 1)
 
 # --- Software: your own setup lines ---
 setup_python() {                      # activate the environment that has requirements.txt installed

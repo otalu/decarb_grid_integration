@@ -6,8 +6,19 @@ source "$REPO/orcd/env.sh"
 SLURM_LOG_DIR="$REPO/out/logs/slurm"
 mkdir -p "$SLURM_LOG_DIR"
 
-# Workers -> memory for the DECARB job (CPUs = workers + 1 for the main process)
-declare -A DECARB_MEM=( [60]="1000G" [90]="1500G" )
+# Workers -> memory, for every job (CPUs = workers + 1 for the main process)
+declare -A JOB_MEM=( [60]="1000G" [90]="1500G" )
+
+# check_workers WORKERS USAGE: sets MEM and CPUS, or prints USAGE and exits
+check_workers() {
+  MEM="${JOB_MEM[${1:-x}]:-}"
+  if [ -z "$MEM" ]; then
+    echo "Usage: $2" >&2
+    echo "workers must be 60 or 90 (memory: 60 -> 1000G, 90 -> 1500G)" >&2
+    exit 1
+  fi
+  CPUS=$(( $1 + 1 ))
+}
 
 # submit_job NAME CPUS MEM TIME DEPENDENCY_JOB_ID BODY
 #   Submits BODY as a batch job running in the repo with env.sh loaded.

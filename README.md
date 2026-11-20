@@ -139,11 +139,13 @@ Fill in `orcd/env.sh` once: partition, mail address, DECARB folder, solver, and 
 Edit `config/*.yaml` as usual, then submit from the login node:
 
 ```bash
-bash orcd/submit_preprocess.sh
-bash orcd/submit_decarb_inputs.sh "study description"
-bash orcd/submit_decarb.sh 90 [study_number]      # workers: 60 (1000G) or 90 (1500G)
-bash orcd/submit_network.sh [study_number]        # network-inputs, opendss, results
+bash orcd/submit_preprocess.sh 90
+bash orcd/submit_decarb_inputs.sh 90 "study description"
+bash orcd/submit_decarb.sh 90 [study_number]
+bash orcd/submit_network.sh 90 [study_number]     # network-inputs, opendss, results
 ```
+
+The first argument is the job's workers, 60 or 90 (60 → 1000G, 90 → 1500G, CPUs = workers + 1). In the Python jobs that worker count replaces the usual parallel workers of the downloads, thermal fit, `decarb-inputs` and OpenDSS (`PIPELINE_WORKERS`); run outside these scripts they keep their usual values.
 
 or the whole chain at once, each job starting only if the previous one succeeded:
 
@@ -151,7 +153,7 @@ or the whole chain at once, each job starting only if the previous one succeeded
 bash orcd/run_all.sh 90 "study description"
 ```
 
-Without a study number, a job uses the latest study when it starts. The DECARB job gets workers + 1 CPUs and the memory listed above; other worker counts are refused, and so are more than 100 workers with Gurobi (license limit). DECARB solves the cases in place in `out/studies/study_N/decarb/`, so `network-inputs` reads them directly. Job output goes to `out/logs/slurm/`, next to the pipeline logs in `out/logs/`. On `mit_preemptable` a job can be stopped early; submitting DECARB again skips buildings that already have `out/ts.csv`.
+`run_all.sh` gives every job the same worker count. Without a study number, a job uses the latest study when it starts. Other worker counts are refused, and so are more than 100 DECARB workers with Gurobi (license limit). DECARB solves the cases in place in `out/studies/study_N/decarb/`, so `network-inputs` reads them directly. Job output goes to `out/logs/slurm/`, next to the pipeline logs in `out/logs/`. On `mit_preemptable` a job can be stopped early; submitting DECARB again skips buildings that already have `out/ts.csv`.
 
 ## 5. Time resolution
 

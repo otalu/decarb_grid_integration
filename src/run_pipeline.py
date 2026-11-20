@@ -27,7 +27,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-from config.loader import load_config, load_decarb_config, load_network_config
+from config.loader import load_config, load_decarb_config, load_network_config, job_workers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ def run_preprocess(cfg):
                 save_outputs=False,
                 batch=use_batching,
                 batch_size=100,
-                n_workers=min(20, len(bldg_ids) // 100 + 1),
+                n_workers=min(job_workers(20), len(bldg_ids) // 100 + 1),
             )
         _run_stage("Thermal Model", _thermal)
 

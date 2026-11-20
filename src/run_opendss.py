@@ -26,7 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 sys.path.insert(0, str(Path(__file__).parent))
-from config.loader import load_config
+from config.loader import load_config, job_workers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -223,7 +223,8 @@ def simulate_feeder(task):
 def main():
     parser = argparse.ArgumentParser(description="OpenDSS Study Runner")
     parser.add_argument("--study", type=int, default=None, help="Study number (default: latest)")
-    parser.add_argument("--workers", type=int, default=20, help="Number of parallel workers")
+    parser.add_argument("--workers", type=int, default=job_workers(20),
+                        help="Number of parallel workers (default: 20, or the orcd/ job's worker count)")
     args = parser.parse_args()
 
     # When started by run_pipeline.py, also write to that run's log file

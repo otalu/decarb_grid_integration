@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -5,6 +6,17 @@ import numpy as np
 import yaml
 
 _config = None
+
+
+def job_workers(default):
+    """Parallel workers for a step: PIPELINE_WORKERS if set (the orcd/ submit
+    scripts set it to the job's worker count), else the step's usual value."""
+    n = os.environ.get("PIPELINE_WORKERS")
+    if n is None:
+        return default
+    if not n.isdigit() or int(n) < 1:
+        raise ValueError(f"PIPELINE_WORKERS must be an integer >= 1, got {n!r}")
+    return int(n)
 
 
 def load_config(config_path=None):

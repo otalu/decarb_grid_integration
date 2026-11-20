@@ -12,18 +12,19 @@ from botocore import UNSIGNED
 from botocore.config import Config
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config.loader import load_config
+from config.loader import load_config, job_workers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 def download_workers(cfg):
-    """Number of parallel downloads (data_acquisition.download_workers)."""
+    """Number of parallel downloads (data_acquisition.download_workers, or the
+    job's worker count in an orcd/ job)."""
     n = (cfg.get("data_acquisition") or {}).get("download_workers")
     if not isinstance(n, int) or isinstance(n, bool) or n < 1:
         raise ValueError(f"data_acquisition.download_workers in config.yaml must be "
                          f"an integer >= 1, got {n!r}")
-    return n
+    return job_workers(n)
 
 
 def _s3_prefix(cfg):
