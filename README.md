@@ -51,6 +51,7 @@ The building state and the network do not have to match. For example, NY or MA b
 | `config/config.yaml` | state/year/time zone, zone, paths, test mode, which preprocessing stages run, matching, heat pump sizing, date range and timestep |
 | `config/decarb.yaml` | tariffs, electrification levels, rooftop solar, which DECARB input files to write |
 | `config/network.yaml` | GenX settings (statewide only), interpolation, workers |
+| `config/orcd.sh` | ORCD only: SLURM partition, mail, workers (60/90) and memory, DECARB folder, solver, software setup lines (section 4.6) |
 
 Settings a new user usually changes:
 
@@ -134,26 +135,26 @@ The `orcd/` folder submits every step as a SLURM job. It does not install anythi
 - a Python 3.11+ environment with `requirements.txt` installed (e.g. `module load miniforge`, then `conda create -n decarb_grid python=3.12` and `pip install -r requirements.txt`);
 - Julia, and Gurobi with your own license (or use `SOLVER="highs"`).
 
-Fill in `orcd/env.sh` once: partition, mail address, DECARB folder, solver, and the lines that set up your Python environment, Julia and Gurobi in a job (`setup_python`, `setup_julia`, `setup_gurobi`). The other scripts find the repository from their own location and need no editing.
+Fill in `config/orcd.sh` once: partition, mail address, `WORKERS`, DECARB folder, solver, and the lines that set up your Python environment, Julia and Gurobi in a job (`setup_python`, `setup_julia`, `setup_gurobi`). The scripts in `orcd/` find the repository from their own location and need no editing.
+
+`WORKERS` (60 or 90) sets every job's size: 60 → 1000G, 90 → 1500G, CPUs = `WORKERS` + 1. DECARB runs that many workers, and in the Python jobs it replaces the usual parallel workers of the downloads, thermal fit, `decarb-inputs` and OpenDSS (`PIPELINE_WORKERS`); run outside these scripts, they keep their usual values. Other values are refused, and so are more than 100 DECARB workers with Gurobi (license limit).
 
 Edit `config/*.yaml` as usual, then submit from the login node:
 
 ```bash
-bash orcd/submit_preprocess.sh 90
-bash orcd/submit_decarb_inputs.sh 90 "study description"
-bash orcd/submit_decarb.sh 90 [study_number]
-bash orcd/submit_network.sh 90 [study_number]     # network-inputs, opendss, results
+bash orcd/submit_preprocess.sh
+bash orcd/submit_decarb_inputs.sh "study description"
+bash orcd/submit_decarb.sh [study_number]
+bash orcd/submit_network.sh [study_number]     # network-inputs, opendss, results
 ```
-
-The first argument is the job's workers, 60 or 90 (60 → 1000G, 90 → 1500G, CPUs = workers + 1). In the Python jobs that worker count replaces the usual parallel workers of the downloads, thermal fit, `decarb-inputs` and OpenDSS (`PIPELINE_WORKERS`); run outside these scripts they keep their usual values.
 
 or the whole chain at once, each job starting only if the previous one succeeded:
 
 ```bash
-bash orcd/run_all.sh 90 "study description"
+bash orcd/run_all.sh "study description"
 ```
 
-`run_all.sh` gives every job the same worker count. Without a study number, a job uses the latest study when it starts. Other worker counts are refused, and so are more than 100 DECARB workers with Gurobi (license limit). DECARB solves the cases in place in `out/studies/study_N/decarb/`, so `network-inputs` reads them directly. Job output goes to `out/logs/slurm/`, next to the pipeline logs in `out/logs/`. On `mit_preemptable` a job can be stopped early; submitting DECARB again skips buildings that already have `out/ts.csv`.
+Without a study number, a job uses the latest study when it starts. DECARB solves the cases in place in `out/studies/study_N/decarb/`, so `network-inputs` reads them directly. Job output goes to `out/logs/slurm/`, next to the pipeline logs in `out/logs/`. On `mit_preemptable` a job can be stopped early; submitting DECARB again skips buildings that already have `out/ts.csv`.
 
 ## 5. Time resolution
 
@@ -179,7 +180,7 @@ derating, and the DECARB templates.
 ```
 config/                     config.yaml, decarb.yaml, network.yaml
 src/                        pipeline stages; src/extras/ holds one-off analysis scripts
-orcd/                       SLURM submit scripts for ORCD (env.sh = your settings)
+orcd/                       SLURM submit scripts for ORCD (settings in config/orcd.sh)
 in/                         downloaded and preprocessed inputs (not in git)
   smartds/                  SMART-DS feeder network, one folder per zone
 out/

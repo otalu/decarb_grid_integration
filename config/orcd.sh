@@ -1,16 +1,18 @@
-# ORCD settings: the only file in orcd/ a user edits.
-# Read by every submit script, both on the login node and inside the job.
+# ORCD (MIT Engaging) settings, read by the submit scripts in orcd/.
+# Shell syntax: it is loaded by bash, both on the login node and inside each job.
 
 # --- SLURM ---
 PARTITION="mit_preemptable"
 MAIL_USER=""                          # e.g. you@mit.edu (empty = no mail)
+WORKERS=90                            # 60 or 90, for every job (60 -> 1000G, 90 -> 1500G; CPUs = WORKERS + 1).
+                                      # The Python steps (downloads, thermal fit, decarb-inputs, OpenDSS)
+                                      # and DECARB all use this many parallel workers.
+DECARB_TIME="12:00:00"                # time limit of the DECARB job
+PY_TIME="12:00:00"                    # time limit of the Python jobs (preprocess, decarb-inputs, network)
 
 # --- DECARB ---
 DECARB_DIR="$HOME/decarb-main"        # DECARB repository (folder with Project.toml)
 SOLVER="gurobi"                       # "gurobi" or "highs" (the Gurobi license allows at most 100 workers)
-DECARB_TIME="12:00:00"                # time limit of the DECARB job
-PY_TIME="12:00:00"                    # time limit of the Python jobs (preprocess, decarb-inputs, network)
-# Workers and memory: chosen per job when submitting (60 -> 1000G, 90 -> 1500G, CPUs = workers + 1)
 
 # --- Software: your own setup lines ---
 setup_python() {                      # activate the environment that has requirements.txt installed
