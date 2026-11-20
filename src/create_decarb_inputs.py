@@ -1266,7 +1266,7 @@ def _check_required_files(cfg, dcfg, building_ids, metadata_df, hp_summary_df):
         f"Re-run the preprocessing stage that produces them, then try again.")
 
 
-def run_decarb_inputs(cfg, dcfg=None, study_dir=None):
+def run_decarb_inputs(cfg, dcfg=None, study_dir=None, description=None):
     """Generate DECARB input files for all cases defined in decarb.yaml.
 
     Parameters
@@ -1431,8 +1431,10 @@ def run_decarb_inputs(cfg, dcfg=None, study_dir=None):
         study_dir.mkdir()
         log.info(f"Created study_{study_num} at {study_dir}")
 
-        # Prompt user for study description and log it
-        description = input(f"Enter a description for study_{study_num}: ").strip()
+        # Study description: from --description (batch jobs), else ask the user
+        if description is None:
+            description = input(f"Enter a description for study_{study_num}: ")
+        description = description.strip()
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         study_log = studies_root / "study_log.csv"
         write_header = not study_log.exists()

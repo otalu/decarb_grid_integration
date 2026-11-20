@@ -103,13 +103,13 @@ def run_preprocess(cfg):
 # Phase 2: DECARB Input Generation
 # ---------------------------------------------------------------------------
 
-def run_decarb_inputs(cfg):
+def run_decarb_inputs(cfg, description=None):
     dcfg = load_decarb_config()
 
     log.info("=== DECARB Input Generation (bookend cases) ===")
     t = time.time()
     from create_decarb_inputs import run_decarb_inputs as _run
-    study_dir = _run(cfg, dcfg)
+    study_dir = _run(cfg, dcfg, description=description)
     log.info(f"DECARB inputs done ({time.time() - t:.0f}s)")
     log.info(f"Study: {study_dir}")
     log.info("Next: run DECARB optimizer on the generated inputs, then "
@@ -237,8 +237,10 @@ def main():
     sub.add_parser("preprocess",
                    help="Run data preparation stages (data acquisition through HP selection)")
 
-    sub.add_parser("decarb-inputs",
-                   help="Generate DECARB optimizer input files (bookend cases)")
+    dec = sub.add_parser("decarb-inputs",
+                         help="Generate DECARB optimizer input files (bookend cases)")
+    dec.add_argument("--description", type=str, default=None,
+                     help="Study description for study_log.csv (default: ask)")
 
     net = sub.add_parser("network-inputs",
                          help="Aggregate DECARB outputs into GenX/OpenDSS inputs")
@@ -279,7 +281,7 @@ def main():
         if args.command == "preprocess":
             run_preprocess(cfg)
         elif args.command == "decarb-inputs":
-            study_dir = run_decarb_inputs(cfg)
+            study_dir = run_decarb_inputs(cfg, args.description)
         elif args.command == "network-inputs":
             run_network_inputs(cfg, args)
         elif args.command == "opendss":

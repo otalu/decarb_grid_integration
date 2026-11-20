@@ -6,12 +6,15 @@
 using Distributed, Dates, Pkg
 
 # ── Settings ──────────────────────────────────────────────────────────────
-STUDY_DIR        = "/home/onurtalu/decarb"   # a study's decarb/ folder (out/studies/study_N/decarb)
-DECARB_DIR       = @__DIR__                  # DECARB repository (folder with Project.toml)
+# STUDY_DIR, DECARB_DIR, N_WORKERS, SOLVER and GUROBI_LICENSE are taken from the
+# environment variables of the same name (GRB_LICENSE_FILE for the license) when
+# set, as the orcd/ submit scripts do; otherwise the values below are used.
+STUDY_DIR        = get(ENV, "STUDY_DIR", "/home/onurtalu/decarb")   # a study's decarb/ folder (out/studies/study_N/decarb)
+DECARB_DIR       = get(ENV, "DECARB_DIR", @__DIR__)                 # DECARB repository (folder with Project.toml)
 LOG_FILE         = joinpath(STUDY_DIR, "run_decarb.log")
-N_WORKERS        = 60
-SOLVER           = "gurobi"                  # "gurobi" or "highs"
-GUROBI_LICENSE   = "/home/onurtalu/gurobi.lic"
+N_WORKERS        = parse(Int, get(ENV, "N_WORKERS", "60"))
+SOLVER           = get(ENV, "SOLVER", "gurobi")                     # "gurobi" or "highs"
+GUROBI_LICENSE   = get(ENV, "GRB_LICENSE_FILE", "/home/onurtalu/gurobi.lic")
 GUROBI_THREADS   = 1
 MIP_GAP          = 1e-2                      # legacy DECARB's Gurobi MIPGap (new default is 1e-4)
 TIME_LIMIT       = 300                       # seconds per building, as in legacy DECARB

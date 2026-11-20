@@ -126,6 +126,33 @@ python src/run_pipeline.py results --study N
 
 The OpenDSS runner reads each case's step size and length from its `Master.dss`, so hourly and 15-min cases run the same way. Results go to `out/studies/study_N/opendss_results/{case}/zone_yearly.csv`.
 
+### 4.6 Running everything on ORCD (MIT Engaging)
+
+The `orcd/` folder submits every step as a SLURM job. It does not install anything; you need, in your home folder:
+
+- this repository (e.g. `~/decarb_grid_integration`) and the DECARB repository (e.g. `~/decarb-main`, with `Pkg.instantiate()` done once);
+- a Python 3.11+ environment with `requirements.txt` installed (e.g. `module load miniforge`, then `conda create -n decarb_grid python=3.12` and `pip install -r requirements.txt`);
+- Julia, and Gurobi with your own license (or use `SOLVER="highs"`).
+
+Fill in `orcd/env.sh` once: partition, mail address, DECARB folder, solver, and the lines that set up your Python environment, Julia and Gurobi in a job (`setup_python`, `setup_julia`, `setup_gurobi`). The other scripts find the repository from their own location and need no editing.
+
+Edit `config/*.yaml` as usual, then submit from the login node:
+
+```bash
+bash orcd/submit_preprocess.sh
+bash orcd/submit_decarb_inputs.sh "study description"
+bash orcd/submit_decarb.sh 90 [study_number]      # workers: 60 (1000G) or 90 (1500G)
+bash orcd/submit_network.sh [study_number]        # network-inputs, opendss, results
+```
+
+or the whole chain at once, each job starting only if the previous one succeeded:
+
+```bash
+bash orcd/run_all.sh 90 "study description"
+```
+
+Without a study number, a job uses the latest study when it starts. The DECARB job gets workers + 1 CPUs and the memory listed above; other worker counts are refused, and so are more than 100 workers with Gurobi (license limit). DECARB solves the cases in place in `out/studies/study_N/decarb/`, so `network-inputs` reads them directly. Job output goes to `out/logs/slurm/`, next to the pipeline logs in `out/logs/`. On `mit_preemptable` a job can be stopped early; submitting DECARB again skips buildings that already have `out/ts.csv`.
+
 ## 5. Time resolution
 
 | Part | Resolution |
@@ -150,6 +177,7 @@ derating, and the DECARB templates.
 ```
 config/                     config.yaml, decarb.yaml, network.yaml
 src/                        pipeline stages; src/extras/ holds one-off analysis scripts
+orcd/                       SLURM submit scripts for ORCD (env.sh = your settings)
 in/                         downloaded and preprocessed inputs (not in git)
   smartds/                  SMART-DS feeder network, one folder per zone
 out/
