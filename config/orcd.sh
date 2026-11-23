@@ -15,10 +15,13 @@ DECARB_DIR="$HOME/decarb-main"        # DECARB repository (folder with Project.t
 SOLVER="gurobi"                       # "gurobi" or "highs" (the Gurobi license allows at most 100 workers)
 
 # --- Software: your own setup lines ---
+CONDA_ENV="decarb_grid"               # conda environment of the pipeline; create it once with
+                                      # "bash orcd/setup_env.sh" (miniforge module + requirements.txt)
+
 setup_python() {                      # activate the environment that has requirements.txt installed
-  module load miniforge
+  module load miniforge               # (using your own venv or env instead? replace these lines)
   eval "$(conda shell.bash hook)"     # makes "conda activate" work in a batch job
-  conda activate decarb_grid
+  conda activate "$CONDA_ENV"
 }
 
 setup_julia() {                       # put julia on PATH (or: module load julia/1.12.6)

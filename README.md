@@ -132,7 +132,7 @@ The OpenDSS runner reads each case's step size and length from its `Master.dss`,
 The `orcd/` folder submits every step as a SLURM job. It does not install anything; you need, in your home folder:
 
 - this repository (e.g. `~/decarb_grid_integration`) and the DECARB repository (e.g. `~/decarb-main`, with `Pkg.instantiate()` done once);
-- a Python 3.11+ environment with `requirements.txt` installed (e.g. `module load miniforge`, then `conda create -n decarb_grid python=3.12` and `pip install -r requirements.txt`);
+- the pipeline's Python environment: run `bash orcd/setup_env.sh` once on the login node. It creates the conda environment `CONDA_ENV` from `config/orcd.sh` with ORCD's `miniforge` module, installs `requirements.txt` and checks the imports (run again after `requirements.txt` changes). To use your own environment instead, change `setup_python` in `config/orcd.sh` and skip the script;
 - Julia, and Gurobi with your own license (or use `SOLVER="highs"`).
 
 Fill in `config/orcd.sh` once: partition, mail address, `WORKERS`, DECARB folder, solver, and the lines that set up your Python environment, Julia and Gurobi in a job (`setup_python`, `setup_julia`, `setup_gurobi`). The scripts in `orcd/` find the repository from their own location and need no editing.
